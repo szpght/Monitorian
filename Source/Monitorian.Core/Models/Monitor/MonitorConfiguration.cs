@@ -6,7 +6,6 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace Monitorian.Core.Models.Monitor
 {
@@ -164,7 +163,21 @@ namespace Monitorian.Core.Models.Monitor
 			public SafePhysicalMonitorHandle Handle { get; }
 
 			[DataMember(Order = 2)]
-			public MonitorCapability Capability { get; }
+			public MonitorCapability Capability => CapabilityLazy.Value;
+
+			private Lazy<MonitorCapability> CapabilityLazy { get; }
+
+			public PhysicalItem(
+				string description,
+				int monitorIndex,
+				SafePhysicalMonitorHandle handle,
+				Lazy<MonitorCapability> capability)
+			{
+				this.Description = description;
+				this.MonitorIndex = monitorIndex;
+				this.Handle = handle;
+				this.CapabilityLazy = capability;
+			}
 
 			public PhysicalItem(
 				string description,
@@ -175,7 +188,11 @@ namespace Monitorian.Core.Models.Monitor
 				this.Description = description;
 				this.MonitorIndex = monitorIndex;
 				this.Handle = handle;
-				this.Capability = capability;
+				this.CapabilityLazy = new Lazy<MonitorCapability>(() =>
+				{
+					GodObject.Log("konstrukcja capability");
+					return capability;
+				});
 			}
 		}
 
@@ -192,6 +209,7 @@ namespace Monitorian.Core.Models.Monitor
 
 		public static IEnumerable<PhysicalItem> EnumeratePhysicalMonitors(IntPtr monitorHandle, bool verbose = false)
 		{
+			GodObject.Log("START GetNumberOfPhysicalMonitorsFromHMONITOR");
 			if (!GetNumberOfPhysicalMonitorsFromHMONITOR(
 				monitorHandle,
 				out uint count))
@@ -199,6 +217,9 @@ namespace Monitorian.Core.Models.Monitor
 				Debug.WriteLine($"Failed to get the number of physical monitors. {Error.GetMessage()}");
 				yield break;
 			}
+
+			GodObject.Log("END   GetNumberOfPhysicalMonitorsFromHMONITOR");
+
 			if (count == 0)
 			{
 				yield break;
@@ -208,6 +229,8 @@ namespace Monitorian.Core.Models.Monitor
 
 			try
 			{
+				GodObject.Log("START GetPhysicalMonitorsFromHMONITOR");
+
 				if (!GetPhysicalMonitorsFromHMONITOR(
 					monitorHandle,
 					count,
@@ -216,6 +239,8 @@ namespace Monitorian.Core.Models.Monitor
 					Debug.WriteLine($"Failed to get an array of physical monitors. {Error.GetMessage()}");
 					yield break;
 				}
+
+				GodObject.Log("END   GetPhysicalMonitorsFromHMONITOR");
 
 				int monitorIndex = 0;
 
@@ -230,7 +255,7 @@ namespace Monitorian.Core.Models.Monitor
 						description: physicalMonitor.szPhysicalMonitorDescription,
 						monitorIndex: monitorIndex,
 						handle: handle,
-						capability: GetMonitorCapability(handle, verbose));
+						capability: new Lazy<MonitorCapability>(() => GetMonitorCapability(handle, verbose)));
 
 					monitorIndex++;
 				}
@@ -243,39 +268,57 @@ namespace Monitorian.Core.Models.Monitor
 
 		private static MonitorCapability GetMonitorCapability(SafePhysicalMonitorHandle physicalMonitorHandle, bool verbose)
 		{
-			bool isHighLevelSupported = GetMonitorCapabilities(
-				physicalMonitorHandle,
-				out MC_CAPS caps,
-				out _)
-				&& caps.HasFlag(MC_CAPS.MC_CAPS_BRIGHTNESS);
-
-			if (GetCapabilitiesStringLength(
-				physicalMonitorHandle,
-				out uint capabilitiesStringLength))
+			try
 			{
-				var buffer = new StringBuilder((int)capabilitiesStringLength);
+				GodObject.Log("START GetMonitorCapability");
+				GodObject.Log($"GetMonitorCapability({physicalMonitorHandle.DangerousGetHandle().ToInt64()})");
 
-				if (CapabilitiesRequestAndCapabilitiesReply(
+				GodObject.Log("START GetMonitorCapabilities");
+				bool isHighLevelSupported = GetMonitorCapabilities(
 					physicalMonitorHandle,
-					buffer,
-					capabilitiesStringLength))
-				{
-					var capabilitiesString = buffer.ToString();
-					var vcpCodes = EnumerateVcpCodes(capabilitiesString).ToArray();
+					out MC_CAPS caps,
+					out _)
+					&& caps.HasFlag(MC_CAPS.MC_CAPS_BRIGHTNESS);
+				GodObject.Log("END   GetMonitorCapabilities");
 
-					return new MonitorCapability(
-						isHighLevelBrightnessSupported: isHighLevelSupported,
-						isLowLevelBrightnessSupported: vcpCodes.Contains((byte)VcpCode.Luminance),
-						isContrastSupported: vcpCodes.Contains((byte)VcpCode.Contrast),
-						capabilitiesString: (verbose ? capabilitiesString : null),
-						capabilitiesReport: (verbose ? MakeCapabilitiesReport(vcpCodes) : null),
-						capabilitiesData: (verbose && !vcpCodes.Any() ? GetCapabilitiesData(physicalMonitorHandle, capabilitiesStringLength) : null));
+				GodObject.Log("START GetCapabilitiesStringLength");
+				var a = GetCapabilitiesStringLength(
+					physicalMonitorHandle,
+					out uint capabilitiesStringLength);
+				GodObject.Log("END   GetCapabilitiesStringLength");
+				if (a)
+				{
+					var buffer = new StringBuilder((int)capabilitiesStringLength);
+
+					GodObject.Log("START CapabilitiesRequestAndCapabilitiesReply in GetMonitorCapability");
+					var b = CapabilitiesRequestAndCapabilitiesReply(
+						physicalMonitorHandle,
+						buffer,
+						capabilitiesStringLength);
+					GodObject.Log("END   CapabilitiesRequestAndCapabilitiesReply in GetMonitorCapability");
+					if (b)
+					{
+						var capabilitiesString = buffer.ToString();
+						var vcpCodes = EnumerateVcpCodes(capabilitiesString).ToArray();
+
+						return new MonitorCapability(
+							isHighLevelBrightnessSupported: isHighLevelSupported,
+							isLowLevelBrightnessSupported: vcpCodes.Contains((byte)VcpCode.Luminance),
+							isContrastSupported: vcpCodes.Contains((byte)VcpCode.Contrast),
+							capabilitiesString: (verbose ? capabilitiesString : null),
+							capabilitiesReport: (verbose ? MakeCapabilitiesReport(vcpCodes) : null),
+							capabilitiesData: (verbose && !vcpCodes.Any() ? GetCapabilitiesData(physicalMonitorHandle, capabilitiesStringLength) : null));
+					}
 				}
+				return new MonitorCapability(
+					isHighLevelBrightnessSupported: isHighLevelSupported,
+					isLowLevelBrightnessSupported: false,
+					isContrastSupported: false);
 			}
-			return new MonitorCapability(
-				isHighLevelBrightnessSupported: isHighLevelSupported,
-				isLowLevelBrightnessSupported: false,
-				isContrastSupported: false);
+			finally
+			{
+				GodObject.Log("END   GetMonitorCapability");
+			}
 
 			static string MakeCapabilitiesReport(byte[] vcpCodes)
 			{
@@ -292,10 +335,13 @@ namespace Monitorian.Core.Models.Monitor
 				{
 					dataPointer = Marshal.AllocHGlobal((int)capabilitiesStringLength);
 
-					if (CapabilitiesRequestAndCapabilitiesReply(
+					GodObject.Log("START CapabilitiesRequestAndCapabilitiesReply in GetCapabilitiesData");
+					var e = CapabilitiesRequestAndCapabilitiesReply(
 						physicalMonitorHandle,
 						dataPointer,
-						capabilitiesStringLength))
+						capabilitiesStringLength);
+					GodObject.Log("END   CapabilitiesRequestAndCapabilitiesReply in GetCapabilitiesData");
+					if (e)
 					{
 						var data = new byte[capabilitiesStringLength];
 						Marshal.Copy(dataPointer, data, 0, data.Length);
@@ -590,6 +636,51 @@ namespace Monitorian.Core.Models.Monitor
 		[DataMember(Order = 6)]
 		public string CapabilitiesData { get; }
 
+		[DataContract]
+		public class SerializationHelper
+		{
+			[DataMember(Order = 0)]
+			public bool A { get; set; }
+
+			[DataMember(Order = 1)]
+			public bool B { get; set; }
+
+			[DataMember(Order = 2)]
+			public bool C { get; set; }
+
+			[DataMember(Order = 3)]
+			public string D { get; set; }
+
+			[DataMember(Order = 4)]
+			public string E { get; set; }
+
+			[DataMember(Order = 5)]
+			public string F { get; set; }
+
+			[DataMember(Order = 6)]
+			public Guid Session { get; set; }
+		}
+
+		public SerializationHelper ToHelper() => new SerializationHelper
+		{
+			C = IsContrastSupported,
+			A = IsHighLevelBrightnessSupported,
+			B = IsLowLevelBrightnessSupported,
+			F = CapabilitiesData,
+			E = CapabilitiesReport,
+			D = CapabilitiesString,
+		};
+
+		public MonitorCapability(SerializationHelper helper)
+		{
+			this.IsHighLevelBrightnessSupported = helper.A;
+			this.IsLowLevelBrightnessSupported = helper.B;
+			this.IsContrastSupported = helper.C;
+			this.CapabilitiesString = helper.D;
+			this.CapabilitiesReport = helper.E;
+			this.CapabilitiesData = helper.F;
+		}
+
 		public MonitorCapability(
 			bool isHighLevelBrightnessSupported,
 			bool isLowLevelBrightnessSupported,
@@ -605,33 +696,5 @@ namespace Monitorian.Core.Models.Monitor
 			this.CapabilitiesReport = capabilitiesReport;
 			this.CapabilitiesData = (capabilitiesData is not null) ? Convert.ToBase64String(capabilitiesData) : null;
 		}
-
-		private MonitorCapability(
-			bool isHighLevelBrightnessSupported,
-			bool isLowLevelBrightnessSupported,
-			bool isContrastSupported,
-			bool isPrecleared,
-			string capabilitiesString,
-			string capabilitiesReport,
-			byte[] capabilitiesData) : this(
-				isHighLevelBrightnessSupported: isHighLevelBrightnessSupported,
-				isLowLevelBrightnessSupported: isLowLevelBrightnessSupported,
-				isContrastSupported: isContrastSupported,
-				capabilitiesString: capabilitiesString,
-				capabilitiesReport: capabilitiesReport,
-				capabilitiesData: capabilitiesData)
-		{
-			this.IsPrecleared = isPrecleared;
-		}
-
-		public static MonitorCapability PreclearedCapability => _preclearedCapability.Value;
-		private static readonly Lazy<MonitorCapability> _preclearedCapability = new(() =>
-			new(isHighLevelBrightnessSupported: false,
-				isLowLevelBrightnessSupported: true,
-				isContrastSupported: true,
-				isPrecleared: true,
-				capabilitiesString: null,
-				capabilitiesReport: null,
-				capabilitiesData: null));
 	}
 }

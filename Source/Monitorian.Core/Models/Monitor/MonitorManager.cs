@@ -127,16 +127,12 @@ namespace Monitorian.Core.Models.Monitor
 				{
 					foreach (var physicalItem in physicalItems)
 					{
-						int index = -1;
-						if (physicalItem.Capability.IsBrightnessSupported ||
-							_preclearedIds.Value.Any())
-						{
-							index = basicItems.FindIndex(x =>
-								!x.IsInternal &&
-								(x.DisplayIndex == handleItem.DisplayIndex) &&
-								(x.MonitorIndex == physicalItem.MonitorIndex) &&
-								string.Equals(x.Description, physicalItem.Description, StringComparison.OrdinalIgnoreCase));
-						}
+						int index = basicItems.FindIndex(x =>
+							!x.IsInternal &&
+							(x.DisplayIndex == handleItem.DisplayIndex) &&
+							(x.MonitorIndex == physicalItem.MonitorIndex) &&
+							string.Equals(x.Description, physicalItem.Description, StringComparison.OrdinalIgnoreCase));
+
 						if (index < 0)
 						{
 							physicalItem.Handle.Dispose();
@@ -145,19 +141,19 @@ namespace Monitorian.Core.Models.Monitor
 
 						var basicItem = basicItems[index];
 
-						MonitorCapability capability = null;
-						if (physicalItem.Capability.IsBrightnessSupported)
+						MonitorCapability capability = GodObject.GetByDeviceInstanceIdOrDefault(basicItem.DeviceInstanceId);
+						if (capability == null)
 						{
-							capability = physicalItem.Capability;
-						}
-						else if (_preclearedIds.Value.Contains(basicItem.DeviceInstanceId))
-						{
-							capability = MonitorCapability.PreclearedCapability;
-						}
-						else
-						{
-							physicalItem.Handle.Dispose();
-							continue;
+							if (physicalItem.Capability.IsBrightnessSupported)
+							{
+								capability = physicalItem.Capability;
+								GodObject.Add(basicItem.DeviceInstanceId, capability);
+							}
+							else
+							{
+								physicalItem.Handle.Dispose();
+								continue;
+							}
 						}
 
 						yield return new DdcMonitorItem(
@@ -169,7 +165,6 @@ namespace Monitorian.Core.Models.Monitor
 							handle: physicalItem.Handle,
 							capability: capability);
 
-						basicItems.RemoveAt(index);
 						if (basicItems.Count == 0)
 							yield break;
 					}

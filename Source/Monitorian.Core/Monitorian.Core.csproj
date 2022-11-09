@@ -51,6 +51,7 @@
   <ItemGroup>
     <Compile Include="AppControllerCore.cs" />
     <Compile Include="AppKeeper.cs" />
+    <Compile Include="GodObject.cs" />
     <Compile Include="Collections\ObservableDictionary.cs" />
     <Compile Include="Collections\ObservableKeyedList.cs" />
     <Compile Include="Common\BindableBase.cs" />
